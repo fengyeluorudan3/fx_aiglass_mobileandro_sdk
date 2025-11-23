@@ -18,6 +18,7 @@ import com.blue.glassesapp.core.utils.AppTimeUtils
 import com.blue.glassesapp.core.utils.CommonModel
 import com.blue.glassesapp.core.utils.CxrUtil
 import com.blue.glassesapp.feature.home.ui.adapter.RecordAdapter
+import com.blue.glassesapp.feature.recognition.PhotoRecognitionService
 import com.rokid.cxr.client.extend.CxrApi
 import com.rokid.cxr.client.extend.callbacks.PhotoResultCallback
 import com.rokid.cxr.client.extend.listeners.AiEventListener
@@ -43,6 +44,13 @@ class HomeVm(val appContext: Application) : AndroidViewModel(appContext) {
     var recordModelList = ArrayList<GlassesRecordModel>()
     var recordAdapter: RecordAdapter = RecordAdapter(recordModelList)
 
+    // 照片识别服务
+    private val photoRecognitionService = PhotoRecognitionService()
+    
+    // 识别结果LiveData
+    val recognitionResult = MutableLiveData<String>()
+    val lastPhoto = MutableLiveData<Bitmap>()
+
     // 当前业务类型
     var currentBusinessType: BusinessType = BusinessType.RECOGNIZE_PERSON_IDENTITY
     fun init() {
@@ -53,6 +61,53 @@ class HomeVm(val appContext: Application) : AndroidViewModel(appContext) {
         }
         initBusiness()
         queryData(1)
+        initPhotoRecognitionService()
+    }
+    
+    /**
+     * 初始化照片识别服务
+     */
+    private fun initPhotoRecognitionService() {
+        photoRecognitionService.setMessageListener(object : PhotoRecognitionService.MessageListener {
+            override fun onPhotoReceived(bitmap: Bitmap) {
+                LogUtils.d(TAG, "收到眼镜端照片: ${bitmap.width}x${bitmap.height}")
+                lastPhoto.postValue(bitmap)
+                recognitionResult.postValue("正在识别...")
+            }
+
+            override fun onRecognitionComplete(result: PhotoRecognitionService.RecognitionResult) {
+                LogUtils.d(TAG, "识别完成: ${result.content}")
+                recognitionResult.postValue(result.content)
+                
+                // 保存识别记录
+                saveRecognitionRecord(result)
+            }
+        })
+        
+        photoRecognitionService.initMessageListener()
+        LogUtils.d(TAG, "照片识别服务已初始化")
+    }
+    
+    /**
+     * 保存识别记录
+     */
+    private fun saveRecognitionRecord(result: PhotoRecognitionService.RecognitionResult) {
+        val record = GlassesRecordModel().apply {
+            direction = InteractionDirection.FROM_DEVICE.value
+            businessType = BusinessType.RECOGNIZE_PERSON_IDENTITY.value
+            message = result.content
+            timestamp = result.timestamp
+        }
+        writeUpdateRecord(record)
+    }
+    
+    /**
+     * 手动触发处理眼镜端消息（用于测试）
+     */
+    fun handleGlassesMessage(jsonMessage: String) {
+        MainScope().launch {
+            photoRecognitionService.handleGlassesMessage(jsonMessage)
+        }
     }
 
     /**
